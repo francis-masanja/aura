@@ -90,7 +90,7 @@
             const label = predictions[0].label;
             const now = Date.now();
 
-            if (label !== lastLabel && (now - lastTime > 1500)) {
+            if (label !== lastLabel && (now - lastTime > 1000)) {
                 if (label === "open") dispatch("gesture-play");
                 else if (label === "closed") dispatch("gesture-pause");
                 else if (label === "point") dispatch("gesture-next");
@@ -98,6 +98,12 @@
                 
                 lastLabel = label;
                 lastTime = now;
+            }
+        } else {
+            // Reset lastLabel if no hand is seen for a bit, 
+            // allowing the same gesture to be performed again
+            if (Date.now() - lastTime > 1000) {
+                lastLabel = "";
             }
         }
     } catch (e) {
