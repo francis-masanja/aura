@@ -1,20 +1,21 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import * as handTrack from 'handtrackjs';
+  import { Hands, HAND_CONNECTIONS } from '@mediapipe/hands';
+  import { Camera } from '@mediapipe/camera_utils';
 
   let video: HTMLVideoElement;
   let canvas: HTMLCanvasElement;
-  let model: any = null;
+  let canvasCtx: CanvasRenderingContext2D | null = null;
+  let camera: Camera | null = null;
   let webcamRunning: boolean = $state(false);
   let modelLoading: boolean = $state(true);
   let errorMessage: string = $state("");
-  
-  const modelParams = {
-    flipHorizontal: true,
-    maxNumBoxes: 1,
-    iouThreshold: 0.5,
-    scoreThreshold: 0.7,
-  };
+  let candidateLabel: string = $state("");
+
+  let lastLabel = "";
+  let lastTime = 0;
+  let gestureCount = 0;
+  const CONFIRMATION_FRAMES = 3;
 
   const dispatch = (eventName: string) => {
     window.dispatchEvent(new CustomEvent(eventName));
@@ -22,11 +23,41 @@
 
   onMount(async () => {
     try {
-      model = await handTrack.load(modelParams);
+      const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+
+      hands.onResults(onResults);
+      
+      // Initialize canvas context
+      if (canvas) {
+        canvasCtx = canvas.getContext('2d');
+      }
+
+      // Setup camera
+      camera = new Camera(video, {
+        onFrame: async () => {
+          if (video && video.readyState >= 2) {
+            await hands.send({ image: video });
+          }
+        },
+        width: 320,
+        height: 180
+      });
+
       modelLoading = false;
+      console.log("MediaPipe Hands loaded");
     } catch (e) {
       errorMessage = "Failed to load AI model.";
-      console.error(e);
+      console.error("Model loading error:", e);
+      modelLoading = false;
     }
   });
 
@@ -34,111 +65,161 @@
     stopCamera();
   });
 
+  function onResults(results: any) {
+    if (!canvasCtx || !canvas) return;
+
+    canvas.width = video.videoWidth || 320;
+    canvas.height = video.videoHeight || 180;
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      const landmarks = results.multiHandLandmarks[0];
+      
+      // Draw hand landmarks
+      // Note: We'll draw simple circles for landmarks
+      for (const landmark of landmarks) {
+        const x = landmark.x * canvas.width;
+        const y = landmark.y * canvas.height;
+        canvasCtx.beginPath();
+        canvasCtx.arc(x, y, 3, 0, 2 * Math.PI);
+        canvasCtx.fillStyle = '#10b981';
+        canvasCtx.fill();
+      }
+
+      // Draw connections
+      canvasCtx.strokeStyle = '#3b82f6';
+      canvasCtx.lineWidth = 2;
+      for (const [i, j] of HAND_CONNECTIONS) {
+        const p1 = landmarks[i];
+        const p2 = landmarks[j];
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
+        canvasCtx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
+        canvasCtx.stroke();
+      }
+
+      processGestures(landmarks);
+    } else {
+      candidateLabel = "";
+      gestureCount = 0;
+    }
+    canvasCtx.restore();
+  }
+
+  function processGestures(lm: any[]) {
+    // Get landmark positions
+    const thumb = lm[4];
+    const index = lm[8];
+    const middle = lm[12];
+    const ring = lm[16];
+    const pinky = lm[20];
+    
+    // Bases
+    const iBase = lm[5];
+    const mBase = lm[9];
+    const rBase = lm[13];
+    const pBase = lm[17];
+    const wrist = lm[0];
+
+    // Check finger states
+    const indexUp = index.y < iBase.y;
+    const middleUp = middle.y < mBase.y;
+    const ringUp = ring.y < rBase.y;
+    const pinkyUp = pinky.y < pBase.y;
+    const thumbUp = thumb.y < lm[2].y;
+
+    let detected = "";
+
+    // Gesture detection logic
+    if (indexUp && middleUp && ringUp && pinkyUp) {
+      detected = "OPEN";
+    } 
+    else if (!indexUp && !middleUp && !ringUp && !pinkyUp && !thumbUp) {
+      detected = "FIST";
+    }
+    else if (thumbUp && !indexUp && !middleUp && !ringUp) {
+      detected = thumb.y < wrist.y ? "THUMBS UP" : "THUMBS DOWN";
+    }
+    else if (indexUp && !middleUp && !ringUp && !pinkyUp) {
+      detected = "POINT";
+    }
+
+    if (detected) {
+      const now = Date.now();
+      
+      if (detected === candidateLabel) {
+        gestureCount++;
+      } else {
+        candidateLabel = detected;
+        gestureCount = 0;
+      }
+
+      if (gestureCount >= CONFIRMATION_FRAMES) {
+        if (detected !== lastLabel && (now - lastTime > 800)) {
+          if (detected === "OPEN") {
+            dispatch("gesture-play");
+            console.log("Gesture: PLAY");
+          } else if (detected === "FIST") {
+            dispatch("gesture-pause");
+            console.log("Gesture: PAUSE");
+          } else if (detected === "POINT") {
+            dispatch("gesture-next");
+            console.log("Gesture: NEXT");
+          } else if (detected === "THUMBS UP") {
+            dispatch("gesture-prev");
+            console.log("Gesture: PREV");
+          }
+          
+          lastLabel = detected;
+          lastTime = now;
+        }
+      }
+    }
+  }
+
   async function startCamera() {
     errorMessage = "";
-    if (!model) {
+    if (modelLoading) {
       errorMessage = "AI Model not loaded yet.";
       return;
     }
     
     try {
-      // Simpler constraints for better compatibility
-      const constraints = { 
-        video: true
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 320, height: 180 } 
+      });
       
       if (video) {
         video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play().catch(e => console.error("Video play error:", e));
-          webcamRunning = true;
-          runDetection();
-        };
+        await video.play();
+        webcamRunning = true;
+        camera?.start();
       }
     } catch (err: any) {
       console.error("Camera Access Error:", err);
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-          errorMessage = "Camera permission denied by system/user.";
+      if (err.name === "NotAllowedError") {
+        errorMessage = "Camera permission denied.";
       } else if (err.name === "NotFoundError") {
-          errorMessage = "No camera hardware detected.";
-      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-          errorMessage = "Camera is already in use by another app.";
+        errorMessage = "No camera detected.";
       } else {
-          errorMessage = "Could not access camera: " + err.message;
+        errorMessage = "Could not access camera.";
       }
     }
   }
 
   function stopCamera() {
     webcamRunning = false;
+    camera?.stop();
     if (video && video.srcObject) {
       const stream = video.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
       video.srcObject = null;
     }
   }
-
-  let lastLabel = "";
-  let lastTime = 0;
-  let gestureCount = 0;
-  let candidateLabel = "";
-  const CONFIRMATION_FRAMES = 3;
-
-  async function runDetection() {
-    if (!webcamRunning || !model) return;
-
-    try {
-        const predictions = await model.detect(video);
-        const context = canvas.getContext("2d");
-        if (context) {
-            context.clearRect(0, 0, canvas.width, canvas.height);
-            model.renderPredictions(predictions, canvas, context, video);
-        }
-
-        if (predictions.length > 0) {
-            const label = predictions[0].label;
-            const now = Date.now();
-
-            if (label === candidateLabel) {
-                gestureCount++;
-            } else {
-                candidateLabel = label;
-                gestureCount = 0;
-            }
-
-            if (gestureCount >= CONFIRMATION_FRAMES) {
-                if (label !== lastLabel && (now - lastTime > 800)) {
-                    if (label === "open") dispatch("gesture-play");
-                    else if (label === "closed") dispatch("gesture-pause");
-                    else if (label === "point") dispatch("gesture-next");
-                    else if (label === "pinch") dispatch("gesture-prev");
-                    
-                    lastLabel = label;
-                    lastTime = now;
-                }
-            }
-        } else {
-            // Reset state if no hand is detected
-            candidateLabel = "";
-            gestureCount = 0;
-            if (Date.now() - lastTime > 1000) {
-                lastLabel = "";
-            }
-        }
-    } catch (e) {
-        console.error("Detection error:", e);
-    }
-
-    if (webcamRunning) {
-      requestAnimationFrame(runDetection);
-    }
-  }
 </script>
 
 <div class="gesture-container">
-  <!-- svelte-ignore a11y_media_has_caption -->
   <video bind:this={video} class="canvasbox" playsinline muted></video>
   <canvas bind:this={canvas} class="canvasbox" width="320" height="180"></canvas>
   
@@ -184,12 +265,12 @@
   
   video {
       opacity: 0.5;
-      transform: scaleX(-1); /* Mirror effect */
+      transform: scaleX(-1);
   }
   
   canvas {
       z-index: 10;
-      transform: scaleX(-1); /* Mirror effect for landmarks too */
+      transform: scaleX(-1);
   }
   
   .overlay {

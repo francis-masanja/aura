@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; media-src 'self' mediastream:;"
+      "csp": "default-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net https://www.gstatic.com https://tfhub.dev https://storage.googleapis.com; img-src 'self' data: blob: https:; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost blob: data: https://cdn.jsdelivr.net https://www.gstatic.com https://tfhub.dev https://storage.googleapis.com; media-src 'self' blob: mediastream:; worker-src 'self' blob:; frame-src 'self' blob:;"
     }
   },
   "bundle": {
