@@ -13,7 +13,7 @@
     flipHorizontal: true,
     maxNumBoxes: 1,
     iouThreshold: 0.5,
-    scoreThreshold: 0.6,
+    scoreThreshold: 0.7,
   };
 
   const dispatch = (eventName: string) => {
@@ -36,29 +36,37 @@
 
   async function startCamera() {
     errorMessage = "";
-    if (!model) return;
+    if (!model) {
+      errorMessage = "AI Model not loaded yet.";
+      return;
+    }
     
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 320, height: 180 } 
-      });
+      // Simpler constraints for better compatibility
+      const constraints = { 
+        video: true
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
       if (video) {
         video.srcObject = stream;
         video.onloadedmetadata = () => {
-          video.play();
+          video.play().catch(e => console.error("Video play error:", e));
           webcamRunning = true;
           runDetection();
         };
       }
     } catch (err: any) {
-      console.error("Camera Error:", err);
-      if (err.name === "NotAllowedError") {
-          errorMessage = "Camera permission denied.";
+      console.error("Camera Access Error:", err);
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          errorMessage = "Camera permission denied by system/user.";
       } else if (err.name === "NotFoundError") {
-          errorMessage = "No camera found.";
+          errorMessage = "No camera hardware detected.";
+      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+          errorMessage = "Camera is already in use by another app.";
       } else {
-          errorMessage = "Camera error: " + err.message;
+          errorMessage = "Could not access camera: " + err.message;
       }
     }
   }
@@ -74,6 +82,9 @@
 
   let lastLabel = "";
   let lastTime = 0;
+  let gestureCount = 0;
+  let candidateLabel = "";
+  const CONFIRMATION_FRAMES = 3;
 
   async function runDetection() {
     if (!webcamRunning || !model) return;
@@ -90,18 +101,28 @@
             const label = predictions[0].label;
             const now = Date.now();
 
-            if (label !== lastLabel && (now - lastTime > 1000)) {
-                if (label === "open") dispatch("gesture-play");
-                else if (label === "closed") dispatch("gesture-pause");
-                else if (label === "point") dispatch("gesture-next");
-                else if (label === "pinch") dispatch("gesture-prev");
-                
-                lastLabel = label;
-                lastTime = now;
+            if (label === candidateLabel) {
+                gestureCount++;
+            } else {
+                candidateLabel = label;
+                gestureCount = 0;
+            }
+
+            if (gestureCount >= CONFIRMATION_FRAMES) {
+                if (label !== lastLabel && (now - lastTime > 800)) {
+                    if (label === "open") dispatch("gesture-play");
+                    else if (label === "closed") dispatch("gesture-pause");
+                    else if (label === "point") dispatch("gesture-next");
+                    else if (label === "pinch") dispatch("gesture-prev");
+                    
+                    lastLabel = label;
+                    lastTime = now;
+                }
             }
         } else {
-            // Reset lastLabel if no hand is seen for a bit, 
-            // allowing the same gesture to be performed again
+            // Reset state if no hand is detected
+            candidateLabel = "";
+            gestureCount = 0;
             if (Date.now() - lastTime > 1000) {
                 lastLabel = "";
             }
@@ -130,7 +151,7 @@
     {:else if !webcamRunning}
       <button onclick={startCamera} class="start-btn">Enable Camera</button>
     {:else}
-      <div class="status-tag">Live Recognition</div>
+      <div class="status-tag">Live: {candidateLabel || "Searching..."}</div>
       <button onclick={stopCamera} class="stop-btn">Disable</button>
     {/if}
   </div>

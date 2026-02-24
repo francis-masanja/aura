@@ -6,8 +6,8 @@
   let activeGesture = $state("");
   let gestureTimer: any;
 
-  async function mediaAction(action: string) {
-    showIndicator(action);
+  async function mediaAction(action: string, label?: string) {
+    showIndicator(label || action);
     await invoke("media_control", { action });
   }
 
@@ -24,6 +24,8 @@
   function showIndicator(type: string) {
     clearTimeout(gestureTimer);
     const labels: Record<string, string> = {
+        "play": "▶️ Play",
+        "pause": "⏸️ Pause",
         "play_pause": "⏯ Toggle Play",
         "next": "⏭ Next Track",
         "prev": "⏮ Previous Track",
@@ -37,10 +39,22 @@
   }
 
   onMount(() => {
-    window.addEventListener("gesture-play", () => mediaAction("play_pause"));
-    window.addEventListener("gesture-pause", () => mediaAction("play_pause"));
-    window.addEventListener("gesture-next", () => mediaAction("next"));
-    window.addEventListener("gesture-prev", () => mediaAction("prev"));
+    const playHandler = () => mediaAction("play_pause", "play");
+    const pauseHandler = () => mediaAction("play_pause", "pause");
+    const nextHandler = () => mediaAction("next");
+    const prevHandler = () => mediaAction("prev");
+
+    window.addEventListener("gesture-play", playHandler);
+    window.addEventListener("gesture-pause", pauseHandler);
+    window.addEventListener("gesture-next", nextHandler);
+    window.addEventListener("gesture-prev", prevHandler);
+
+    return () => {
+      window.removeEventListener("gesture-play", playHandler);
+      window.removeEventListener("gesture-pause", pauseHandler);
+      window.removeEventListener("gesture-next", nextHandler);
+      window.removeEventListener("gesture-prev", prevHandler);
+    };
   });
 </script>
 
