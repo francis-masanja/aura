@@ -88,6 +88,31 @@ pub fn run() {
             volume_control,
             brightness_control
         ])
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            {
+                use tauri::Manager;
+                use webkit2gtk::glib::ObjectExt;
+                use webkit2gtk::WebViewExt;
+                use webkit2gtk::PermissionRequestExt;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.with_webview(|webview| {
+                        #[cfg(target_os = "linux")]
+                        {
+                            webview.inner().connect_permission_request(|_, request: &webkit2gtk::PermissionRequest| {
+                                if request.is::<webkit2gtk::UserMediaPermissionRequest>() || 
+                                   request.is::<webkit2gtk::DeviceInfoPermissionRequest>() {
+                                    request.allow();
+                                    return true;
+                                }
+                                false
+                            });
+                        }
+                    });
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

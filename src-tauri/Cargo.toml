@@ -26,3 +26,7 @@ enigo = "0.2.0"
 brightness = "0.8.0"
 futures-lite = "2" # Needed for async brightness operations
 
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+gtk = "0.18"
+

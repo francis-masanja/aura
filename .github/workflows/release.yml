@@ -1,0 +1,53 @@
+name: Build Aura App
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # This allows you to click a button on GitHub to trigger the build manually
+
+jobs:
+  build-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        # This spins up three separate cloud servers simultaneously
+        platform: [macos-latest, ubuntu-22.04, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        # Note: We build the AppImage on Ubuntu 22.04 because AppImages built on older systems 
+        # are perfectly compatible with newer, rolling-release systems like Arch Linux.
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Frontend Dependencies
+        # If you use yarn or pnpm instead of npm, change this command!
+        run: npm install 
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and Package Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # We keep NO_STRIP here just in case the Linux runner hits a similar AppImage snag
+          NO_STRIP: 1
+        with:
+          tagName: app-v__VERSION__ # Automatically grabs the version from your tauri.conf.json
+          releaseName: 'Aura v__VERSION__'
+          releaseBody: 'Automated release for Windows, macOS, and Linux.'
+          releaseDraft: true
+          prerelease: false
